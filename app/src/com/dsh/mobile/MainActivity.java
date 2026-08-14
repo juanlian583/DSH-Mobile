@@ -50,6 +50,8 @@ import java.io.RandomAccessFile;
 import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.net.URL;
 
 /**
@@ -213,9 +215,17 @@ public class MainActivity extends Activity {
         return b;
     }
 
+    /** 记录 App 自身操作到本地日志（连接模式等无服务日志时也有内容可看）。 */
+    private void appLog(final String msg) {
+        File f = new File(filesDir, "app.log");
+        try (FileWriter w = new FileWriter(f, true)) {
+            w.write(new SimpleDateFormat("MM-dd HH:mm:ss").format(new Date()) + " " + msg + "\n");
+        } catch (IOException ignored) {}
+    }
+
     private String readLogTail() {
         StringBuilder sb = new StringBuilder();
-        for (File f : new File[]{prootLog, new File(rootfsDir, "root/dsh.log")}) {
+        for (File f : new File[]{new File(filesDir, "app.log"), prootLog, new File(rootfsDir, "root/dsh.log")}) {
             if (f.exists() && f.length() > 0) {
                 sb.append("===== ").append(f.getName()).append(" =====\n");
                 long len = f.length();
@@ -234,7 +244,9 @@ public class MainActivity extends Activity {
                 } catch (IOException ignored) {}
             }
         }
-        return sb.length() == 0 ? "(暂无日志)" : sb.toString();
+        return sb.length() == 0
+                ? "(暂无日志记录)\n提示：连接模式下本机没有服务日志；远程 dsh 的日志请在运行该服务的环境查看。"
+                : sb.toString();
     }
 
     private void copyLogToClipboard() {
@@ -307,11 +319,14 @@ public class MainActivity extends Activity {
             if (selRemote[0]) {
                 int code = httpCode(base + "/");
                 if (code >= 200 && code < 500) {
+                    appLog("连接成功 " + base);
                     loadWebView(base);
                 } else {
+                    appLog("连接失败 " + base + " (code=" + code + ")");
                     showConnectFailDialog(base, code < 0 ? "连接失败（拒绝/超时/网络隔离）" : "HTTP " + code);
                 }
             } else {
+                appLog("启动内置实例（端口 " + port() + "）");
                 showBootConsole();
                 startServer();
             }
@@ -485,6 +500,7 @@ public class MainActivity extends Activity {
         log("→ 开始安装（运行时已内置，无需下载）…");
         new Thread(() -> {
             try {
+                appLog("开始安装（内置运行时解压）");
                 log("1/4 准备 proot 二进制…");
                 installProotBinary();
                 log("2/4 解压内置运行时（约需几分钟，请耐心等待）…");
@@ -596,6 +612,7 @@ public class MainActivity extends Activity {
         if (booting || prootProcess != null) return;
         booting = true;
         setBusy(true);
+        appLog("启动内置 dsh（端口 " + port() + "）");
         log("→ 正在启动 dsh 服务（端口 " + port() + "，首次较慢）…");
         new Thread(() -> {
             try {
@@ -625,6 +642,7 @@ public class MainActivity extends Activity {
                 pumpLog(prootProcess.getInputStream(), prootLog);
                 boolean ok = waitForServer(BOOT_TIMEOUT_MS);
                 if (ok) {
+                    appLog("内置 dsh 就绪（端口 " + port() + "）");
                     ui.post(() -> { setBusy(false); loadWebView("http://127.0.0.1:" + port()); });
                 } else {
                     ui.post(() -> {
@@ -733,6 +751,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadWebView(final String base) {
+        appLog("打开界面 " + base);
         ui.post(() -> {
             FrameLayout frame = new FrameLayout(this);
             frame.setBackgroundColor(Color.BLACK);
@@ -1057,6 +1076,7 @@ public class MainActivity extends Activity {
     // ---------------- shutdown ----------------
 
     private void killServer() {
+        appLog("停止服务");
         if (isRemoteMode()) { // 远程模式不管理内置服务
             if (prootProcess != null) {
                 int pid = pidOf(prootProcess);
