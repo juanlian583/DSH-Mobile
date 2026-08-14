@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DSH 手机端</string>
+    <!-- 运行时包默认下载地址（本机局域网服务），可在 App 里修改 -->
+    <string name="runtime_url_default">http://127.0.0.1:8765/dsh-runtime-arm64.tar.gz</string>
+</resources>

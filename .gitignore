@@ -1,0 +1,12 @@
+# 构建产物（发布时上传到 GitHub Releases，不入库）
+releases/
+app/build/
+app/assets/proot
+
+# 签名密钥：绝不提交！
+*.keystore
+
+# 系统/IDE
+.DS_Store
+*.iml
+.idea/
