@@ -407,6 +407,7 @@ public class MainActivity extends Activity {
                 log("2/5 下载运行时包…");
                 download(url, runtimeTar);
                 log("3/5 解压 rootfs…");
+                ensureWritableDir(rootfsDir);
                 TarExtractor.extract(runtimeTar, rootfsDir, (bytes, entry) -> {
                     if ((bytes % (256L << 20)) < (1 << 16)) {
                         log("   …已解压 " + (bytes >> 20) + " MB");
@@ -432,7 +433,10 @@ public class MainActivity extends Activity {
     // ---------------- install steps ----------------
 
     private void installProotBinary() throws IOException {
-        binDir.mkdirs();
+        ensureWritableDir(binDir);
+        if (prootBin.exists() && !prootBin.canWrite()) {
+            prootBin.delete(); // 清掉权限异常的残留文件
+        }
         AssetManager am = getAssets();
         try (InputStream in = am.open("proot");
              OutputStream out = new FileOutputStream(prootBin)) {
@@ -441,6 +445,29 @@ public class MainActivity extends Activity {
             while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
         }
         makeExecutable(prootBin);
+    }
+
+    /**
+     * 确保目录存在且可写；状态异常时尝试修复（改权限/删除重建）。
+     * 若仍不可写（如应用分身/双开环境数据目录异常），抛出带指引的错误。
+     */
+    private void ensureWritableDir(File dir) throws IOException {
+        if (dir.isDirectory() && dir.canWrite()) return;
+        if (dir.exists()) {
+            dir.setWritable(true, false);
+            dir.setExecutable(true, false);
+            dir.setReadable(true, false);
+        }
+        if (!dir.isDirectory() || !dir.canWrite()) {
+            dir.delete();
+            if (!dir.mkdirs()) {
+                throw new IOException("无法创建目录 " + dir + " —— 请清除应用数据或卸载重装");
+            }
+        }
+        if (!dir.canWrite()) {
+            throw new IOException("应用数据目录不可写：" + dir
+                    + " —— 请清除数据/重装；若使用「应用分身/双开」请改用正常安装");
+        }
     }
 
     /**
