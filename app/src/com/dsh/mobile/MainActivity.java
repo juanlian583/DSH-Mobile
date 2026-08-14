@@ -61,7 +61,7 @@ import java.net.URL;
  */
 public class MainActivity extends Activity {
 
-    private static final int PORT = 3080;
+    private static final int PORT = 3091; // 独立端口：与本机 3080 的环境隔离，互不冲突
     private static final long BOOT_TIMEOUT_MS = 300_000;
     /** 桌面版 Chrome UA —— 让网页端按"电脑"标识渲染 */
     private static final String DESKTOP_UA =
@@ -497,7 +497,11 @@ public class MainActivity extends Activity {
                         "/bin/bash", "-c",
                         "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; "
                                 + "export HOME=/root; export TERM=xterm; "
-                                + "exec /root/boot.sh"
+                                + "export DSH_HOME=/root/.dsh; export DSH_TELEMETRY_DISABLED=1; "
+                                + "mkdir -p $DSH_HOME; "
+                                + "if [ -f /root/dsh.pid ]; then kill $(cat /root/dsh.pid) 2>/dev/null || true; fi; "
+                                + "dsh web --port " + PORT + " >> /root/dsh.log 2>&1 & "
+                                + "DPID=$!; echo $DPID > /root/dsh.pid; wait $DPID"
                 );
                 pb.redirectErrorStream(true);
                 prootProcess = pb.start();
