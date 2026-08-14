@@ -1,5 +1,7 @@
 # DSH-Mobile 📱
 
+> 仓库：https://github.com/juanlian583/DSH-Mobile · Release：https://github.com/juanlian583/DSH-Mobile/releases
+
 把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）智能体完整装进安卓手机：
 **不依赖远程服务器、不打开浏览器**。手机内部用 [proot](https://github.com/proot-me/proot) 运行一个
 Ubuntu(arm64) 用户态，里面跑 `dsh web`，App 用全屏 WebView 嵌入界面 ——
@@ -29,8 +31,8 @@ bash / 文件 / 子代理 / 网页搜索等全部工具都在手机上真实运�
 1. 安装 APK（允许"未知来源"）。
 2. 打开 App，填写：
    - **运行时包下载地址**：默认 `http://127.0.0.1:8765/...`（本机开发用）。
-     **普通用户请改为 Release 附件的直链**，例如：
-     `https://github.com/<你的账号>/<仓库>/releases/download/<tag>/dsh-runtime-arm64.tar.gz`
+     **普通用户请改为 Release 附件的直链**：
+     `https://github.com/juanlian583/DSH-Mobile/releases/download/v1.7/dsh-runtime-arm64.tar.gz`
    - **DeepSeek API Key**：粘贴你的 `sk-...`（DeepSeek 开放平台获取）。
 3. 点「开始安装并启动」：下载 → 解压（需约 2GB 空间）→ 自动启动进入界面。
 
