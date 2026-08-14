@@ -30,7 +30,7 @@ bash / 文件 / 子代理 / 网页搜索等全部工具都在手机上真实运�
 
 1. 安装 APK（允许"未知来源"）。
 2. 打开 App，**只需粘贴 DeepSeek API Key**（`sk-...`，DeepSeek 开放平台获取）。
-   运行时包下载地址已内置（默认指向本仓库最新 Release 的运行时），无需填写。
+   运行时包下载地址已内置（固定指向 v1.7 Release 的运行时，无需填写）。
 3. 点「开始安装并启动」：自动下载 → 解压（需约 2GB 空间）→ 自动启动进入界面。
 
 ## 从源码构建
@@ -44,6 +44,11 @@ cd runtime && sudo ./build-rootfs.sh ../releases
 ```
 
 构建脚本会自动获取并编译 proot 静态二进制（见 THIRD_PARTY_NOTICES.md）。
+
+> 当前所有版本均为 **beta（预发布）** 状态。注意：全部标记预发布后
+> `releases/latest` 直链会失效，因此 App 内置的运行时下载地址**固定指向 v1.7 的直链**。
+> **发布新版本时若运行时未变，无需改动；若运行时更新，需同步上传新包并更新
+> `app/res/values/strings.xml` 里的默认下载地址**。
 
 ## 发布到 GitHub Releases（维护者）
 
