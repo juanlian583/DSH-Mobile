@@ -61,7 +61,7 @@ import java.net.URL;
  */
 public class MainActivity extends Activity {
 
-    private static final int PORT = 3091; // 独立端口：与本机 3080 的环境隔离，互不冲突
+    private static final int DEFAULT_PORT = 3091; // 默认端口：与本机 3080 的环境隔离，可在设置中修改
     private static final long BOOT_TIMEOUT_MS = 300_000;
     /** 桌面版 Chrome UA —— 让网页端按"电脑"标识渲染 */
     private static final String DESKTOP_UA =
@@ -480,7 +480,7 @@ public class MainActivity extends Activity {
         if (booting || prootProcess != null) return;
         booting = true;
         setBusy(true);
-        log("→ 正在启动 dsh 服务（首次较慢，请耐心等待）…");
+        log("→ 正在启动 dsh 服务（端口 " + port() + "，首次较慢）…");
         new Thread(() -> {
             try {
                 makeExecutable(prootBin);
@@ -500,7 +500,7 @@ public class MainActivity extends Activity {
                                 + "export DSH_HOME=/root/.dsh; export DSH_TELEMETRY_DISABLED=1; "
                                 + "mkdir -p $DSH_HOME; "
                                 + "if [ -f /root/dsh.pid ]; then kill $(cat /root/dsh.pid) 2>/dev/null || true; fi; "
-                                + "dsh web --port " + PORT + " >> /root/dsh.log 2>&1 & "
+                                + "dsh web --port " + port() + " >> /root/dsh.log 2>&1 & "
                                 + "DPID=$!; echo $DPID > /root/dsh.pid; wait $DPID"
                 );
                 pb.redirectErrorStream(true);
@@ -536,7 +536,7 @@ public class MainActivity extends Activity {
         while (System.currentTimeMillis() < deadline) {
             if (killed) return false;
             if (prootProcess == null || !prootProcess.isAlive()) return false;
-            if (httpOk("http://127.0.0.1:" + PORT + "/")) return true;
+            if (httpOk("http://127.0.0.1:" + port() + "/")) return true;
             try { Thread.sleep(1000); } catch (InterruptedException e) { return false; }
         }
         return false;
@@ -587,6 +587,11 @@ public class MainActivity extends Activity {
 
     // ---------------- WebView UI ----------------
 
+    /** 当前服务端口（可在设置中修改，默认 3091）。 */
+    private int port() {
+        return getSharedPreferences(PREF, MODE_PRIVATE).getInt("port", DEFAULT_PORT);
+    }
+
     /** 桌面模式：默认开启。开启时用桌面 UA + 固定宽视口(1280px)，网页端按电脑布局渲染。 */
     private boolean isDesktopMode() {
         return getSharedPreferences(PREF, MODE_PRIVATE).getBoolean("desktop_mode", true);
@@ -627,8 +632,8 @@ public class MainActivity extends Activity {
                 public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
                     // 桌面模式：把主页的 viewport 从 device-width 重写为固定宽，
                     // 让 window.innerWidth >= 1024，前端按桌面三栏布局渲染。
-                    if (isDesktopMode() && (url.equals("http://127.0.0.1:" + PORT + "/")
-                            || url.equals("http://127.0.0.1:" + PORT + "/index.html"))) {
+                    if (isDesktopMode() && (url.equals("http://127.0.0.1:" + port() + "/")
+                            || url.equals("http://127.0.0.1:" + port() + "/index.html"))) {
                         try {
                             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                             c.setConnectTimeout(5000);
@@ -653,7 +658,7 @@ public class MainActivity extends Activity {
                 }
             });
             webView.setWebChromeClient(new WebChromeClient());
-            webView.loadUrl("http://127.0.0.1:" + PORT);
+            webView.loadUrl("http://127.0.0.1:" + port());
             frame.addView(webView, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -770,6 +775,8 @@ public class MainActivity extends Activity {
         LinearLayout root = dialogRoot(d);
         root.addView(mkRow("修改 API Key 并重启", null, () -> { d.dismiss(); editKeyDialog(); }));
         root.addView(mkDivider());
+        root.addView(mkRow("修改服务端口", "当前 " + port(), () -> { d.dismiss(); editPortDialog(); }));
+        root.addView(mkDivider());
         root.addView(mkRow("桌面模式", isDesktopMode() ? "开" : "关", () -> { d.dismiss(); toggleDesktopMode(); }));
         root.addView(mkDivider());
         root.addView(mkRow("查看运行日志", null, () -> { d.dismiss(); showLogDialog(); }));
@@ -791,6 +798,45 @@ public class MainActivity extends Activity {
         Button cancel = mkButton("取消", 1);
         cancel.setOnClickListener(v -> d.dismiss());
         btns.addView(cancel);
+        root.addView(btns);
+        d.show();
+    }
+
+    private void editPortDialog() {
+        final Dialog d = buildDialog("修改服务端口");
+        LinearLayout root = dialogRoot(d);
+        root.addView(mkLabel("端口范围 1024-65535。改完自动重启服务并刷新界面。", 12, false));
+        final EditText input = mkEdit("端口号", false);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setText(String.valueOf(port()));
+        root.addView(input);
+
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        btns.setGravity(Gravity.END);
+        Button cancel = mkButton("取消", 1);
+        cancel.setOnClickListener(v -> d.dismiss());
+        btns.addView(cancel);
+        Button save = mkButton("保存并重启", 0);
+        save.setOnClickListener(v -> {
+            int p;
+            try {
+                p = Integer.parseInt(input.getText().toString().trim());
+            } catch (Exception e) {
+                toast("端口必须是数字");
+                return;
+            }
+            if (p < 1024 || p > 65535) {
+                toast("端口范围：1024-65535");
+                return;
+            }
+            getSharedPreferences(PREF, MODE_PRIVATE).edit().putInt("port", p).apply();
+            toast("端口已改为 " + p + "，正在重启…");
+            killServer();
+            startServer();
+            d.dismiss();
+        });
+        btns.addView(save);
         root.addView(btns);
         d.show();
     }
