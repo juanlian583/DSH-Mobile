@@ -103,11 +103,8 @@ public class MainActivity extends Activity {
         prootBin = new File(binDir, "proot");
         prootLog = new File(filesDir, "dsh-proot.log");
 
-        if (isReady()) {
-            showStartupChooser();
-        } else {
-            showSetupUi();
-        }
+        // 永远先选运行方式：连接已有服务无需安装运行时
+        showStartupChooser();
     }
 
     @Override
@@ -327,8 +324,12 @@ public class MainActivity extends Activity {
                 }
             } else {
                 appLog("启动内置实例（端口 " + port() + "）");
-                showBootConsole();
-                startServer();
+                if (isReady()) {
+                    showBootConsole();
+                    startServer();
+                } else {
+                    showSetupUi(); // 首次使用内置实例：先安装内置运行时
+                }
             }
         });
         root.addView(go);
@@ -489,6 +490,15 @@ public class MainActivity extends Activity {
         actionButton = mkButton("开始安装并启动", 0);
         actionButton.setOnClickListener(v -> startSetup());
         root.addView(actionButton);
+
+        Button copyLogBtn = mkButton("复制日志", 1);
+        copyLogBtn.setOnClickListener(v -> copyLogToClipboard());
+        LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp2.setMargins(0, dp(10), 0, 0);
+        root.addView(copyLogBtn, clp2);
+
+        root.addView(mkLabel("安装完成后，下次启动可在「连接已有服务 / 使用内置实例」间自由选择。", 11, false));
 
         setContentView(root);
     }
