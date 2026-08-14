@@ -463,38 +463,67 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 下载（带断点续传 + 自动重试，网络中断不丢进度）。 */
     private void download(String urlStr, File target) throws IOException {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setConnectTimeout(60_000);
-        conn.setReadTimeout(120_000);
-        conn.setInstanceFollowRedirects(true);
-        int code = conn.getResponseCode();
-        if (code != 200) throw new IOException("HTTP " + code + " (下载地址无效?)");
-        long total = conn.getContentLengthLong();
-        File tmp = new File(target.getAbsolutePath() + ".part");
-        try (InputStream in = conn.getInputStream();
-             OutputStream out = new FileOutputStream(tmp)) {
-            byte[] buf = new byte[1 << 16];
-            long done = 0;
-            int r;
-            long last = 0;
-            while ((r = in.read(buf)) > 0) {
-                out.write(buf, 0, r);
-                done += r;
-                if (total > 0 && done - last > (8L << 20)) {
-                    last = done;
-                    final long d = done, t = total;
-                    log("   下载 " + (d >> 20) + " / " + (t >> 20) + " MB");
+        File part = new File(target.getAbsolutePath() + ".part");
+        for (int attempt = 1; attempt <= 6; attempt++) {
+            long resume = part.exists() ? part.length() : 0;
+            HttpURLConnection conn = null;
+            try {
+                conn = open(urlStr, resume);
+                int code = conn.getResponseCode();
+                if (resume > 0 && code == 200) {
+                    // 服务器不支持断点续传：从头再来
+                    part.delete();
+                    resume = 0;
+                    conn.disconnect();
+                    conn = open(urlStr, 0);
+                    code = conn.getResponseCode();
                 }
+                if (code != 200 && code != 206) throw new IOException("HTTP " + code + " (下载地址无效?)");
+                // 206 时 Content-Length 是剩余部分
+                long total = resume + conn.getContentLengthLong();
+                long done = resume;
+                try (InputStream in = conn.getInputStream();
+                     OutputStream out = new FileOutputStream(part, resume > 0)) {
+                    byte[] buf = new byte[1 << 16];
+                    int r;
+                    long lastReport = 0;
+                    while ((r = in.read(buf)) > 0) {
+                        out.write(buf, 0, r);
+                        done += r;
+                        if (total > 0 && done - lastReport > (8L << 20)) {
+                            lastReport = done;
+                            final long d = done, t = total;
+                            log("   下载 " + (d >> 20) + " / " + (t >> 20) + " MB");
+                        }
+                    }
+                }
+                if (total > 0 && done < total) {
+                    throw new IOException("下载不完整: " + done + "/" + total);
+                }
+                if (!part.renameTo(target)) {
+                    target.delete();
+                    part.renameTo(target);
+                }
+                return; // 成功
+            } catch (IOException e) {
+                if (attempt >= 6) throw e;
+                log("   连接中断(" + e.getClass().getSimpleName() + ")，" + (attempt + 1) + " 秒后自动续传…");
+                try { Thread.sleep((attempt + 1) * 1000L); } catch (InterruptedException ie) { throw e; }
+            } finally {
+                if (conn != null) conn.disconnect();
             }
-        } finally {
-            conn.disconnect();
         }
-        if (!tmp.renameTo(target)) {
-            target.delete();
-            tmp.renameTo(target);
-        }
+    }
+
+    private HttpURLConnection open(String urlStr, long resume) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(90_000);
+        conn.setInstanceFollowRedirects(true);
+        if (resume > 0) conn.setRequestProperty("Range", "bytes=" + resume + "-");
+        return conn;
     }
 
     private void writeApiKey(String key) throws IOException {
