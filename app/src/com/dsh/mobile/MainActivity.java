@@ -352,7 +352,8 @@ public class MainActivity extends Activity {
         advBox.setOrientation(LinearLayout.VERTICAL);
         advBox.setVisibility(View.GONE);
         advBox.addView(mkLabel("运行时包下载地址（已内置默认值，一般不用改）", 12, false));
-        urlInput = mkEdit(getString(R.string.runtime_url_default), false);
+        urlInput = mkEdit("https://…（默认已填好）", false);
+        urlInput.setText(getString(R.string.runtime_url_default)); // 真正填入默认值，而非仅提示
         advBox.addView(urlInput);
         advToggle.setOnClickListener(v -> {
             boolean show = advBox.getVisibility() != View.VISIBLE;
