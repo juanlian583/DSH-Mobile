@@ -62,7 +62,10 @@ import java.net.URL;
  */
 public class MainActivity extends Activity {
 
-    private static final int DEFAULT_PORT = 3091; // 默认端口：与本机 3080 的环境隔离，可在设置中修改
+    private static final int DEFAULT_PORT = 3091; // 内置实例默认端口
+    private static final int DEFAULT_REMOTE_PORT = 3080; // 连接已有服务默认端口
+    private static final String PREF_MODE = "mode";       // "builtin" | "remote"
+    private static final String PREF_REMOTE_PORT = "remote_port";
     private static final long BOOT_TIMEOUT_MS = 300_000;
     /** 桌面版 Chrome UA —— 让网页端按"电脑"标识渲染 */
     private static final String DESKTOP_UA =
@@ -99,8 +102,7 @@ public class MainActivity extends Activity {
         prootLog = new File(filesDir, "dsh-proot.log");
 
         if (isReady()) {
-            showBootConsole();
-            startServer();
+            showStartupChooser();
         } else {
             showSetupUi();
         }
@@ -239,6 +241,80 @@ public class MainActivity extends Activity {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         cm.setPrimaryClip(ClipData.newPlainText("dsh-log", readLogTail()));
         toast("日志已复制，可直接粘贴发送");
+    }
+
+    // ---------------- 运行方式选择 ----------------
+
+    private void showStartupChooser() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(28), dp(72), dp(28), dp(28));
+        root.setBackgroundResource(R.drawable.bg_screen);
+
+        root.addView(mkLabel("DSH 智能体", 24, true));
+        root.addView(mkLabel("选择本次运行方式", 13, false));
+
+        final boolean[] selRemote = {isRemoteMode()};
+        final EditText portInput = mkEdit("端口号", false);
+        portInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        portInput.setText(String.valueOf(remotePort()));
+        portInput.setEnabled(selRemote[0]);
+
+        final Button rowRemote = mkButton("连接已有服务（端口）", 1);
+        final Button rowBuiltin = mkButton("使用内置本地实例", 1);
+        rowRemote.setTextSize(14);
+        rowBuiltin.setTextSize(14);
+        rowRemote.setOnClickListener(v -> {
+            selRemote[0] = true;
+            portInput.setEnabled(true);
+            refreshChooserRows(rowRemote, rowBuiltin, selRemote);
+        });
+        rowBuiltin.setOnClickListener(v -> {
+            selRemote[0] = false;
+            portInput.setEnabled(false);
+            refreshChooserRows(rowRemote, rowBuiltin, selRemote);
+        });
+        refreshChooserRows(rowRemote, rowBuiltin, selRemote);
+
+        root.addView(mkLabel("运行方式", 13, true));
+        root.addView(rowRemote);
+        root.addView(mkLabel("  连接手机里其他 proot 环境已运行的 dsh（不启动内置实例）", 11, false));
+        root.addView(rowBuiltin);
+        root.addView(mkLabel("  启动 App 内置的 proot + dsh（本机独立实例）", 11, false));
+        root.addView(mkLabel("连接端口（远程模式）", 12, true));
+        root.addView(portInput);
+
+        Button go = mkButton("进入", 0);
+        go.setOnClickListener(v -> {
+            int rp;
+            try {
+                rp = Integer.parseInt(portInput.getText().toString().trim());
+            } catch (Exception e) {
+                rp = DEFAULT_REMOTE_PORT;
+            }
+            if (rp < 1024 || rp > 65535) rp = DEFAULT_REMOTE_PORT;
+            getSharedPreferences(PREF, MODE_PRIVATE).edit()
+                    .putString(PREF_MODE, selRemote[0] ? "remote" : "builtin")
+                    .putInt(PREF_REMOTE_PORT, rp)
+                    .apply();
+            if (selRemote[0]) {
+                if (httpOk("http://127.0.0.1:" + rp + "/")) {
+                    loadWebView(rp);
+                } else {
+                    toast("无法连接 127.0.0.1:" + rp + "，请确认该端口的 dsh 服务已运行");
+                }
+            } else {
+                showBootConsole();
+                startServer();
+            }
+        });
+        root.addView(go);
+        setContentView(root);
+    }
+
+    private void refreshChooserRows(Button remote, Button builtin, boolean[] selRemote) {
+        remote.setBackgroundResource(selRemote[0] ? R.drawable.bg_button_primary : R.drawable.bg_button_ghost);
+        builtin.setBackgroundResource(selRemote[0] ? R.drawable.bg_button_ghost : R.drawable.bg_button_primary);
     }
 
     // ---------------- boot console UI ----------------
@@ -485,6 +561,10 @@ public class MainActivity extends Activity {
     // ---------------- server boot ----------------
 
     private void startServer() {
+        if (isRemoteMode()) {
+            toast("当前为「连接端口」模式，无需启动内置服务");
+            return;
+        }
         if (booting || prootProcess != null) return;
         booting = true;
         setBusy(true);
@@ -517,7 +597,7 @@ public class MainActivity extends Activity {
                 pumpLog(prootProcess.getInputStream(), prootLog);
                 boolean ok = waitForServer(BOOT_TIMEOUT_MS);
                 if (ok) {
-                    ui.post(() -> { setBusy(false); loadWebView(); });
+                    ui.post(() -> { setBusy(false); loadWebView(port()); });
                 } else {
                     ui.post(() -> {
                         setBusy(false);
@@ -595,9 +675,19 @@ public class MainActivity extends Activity {
 
     // ---------------- WebView UI ----------------
 
-    /** 当前服务端口（可在设置中修改，默认 3091）。 */
+    /** 内置实例端口（可在设置中修改，默认 3091）。 */
     private int port() {
         return getSharedPreferences(PREF, MODE_PRIVATE).getInt("port", DEFAULT_PORT);
+    }
+
+    /** 连接已有服务的端口（默认 3080）。 */
+    private int remotePort() {
+        return getSharedPreferences(PREF, MODE_PRIVATE).getInt(PREF_REMOTE_PORT, DEFAULT_REMOTE_PORT);
+    }
+
+    /** 运行方式：true=连接已有端口服务；false=启动内置实例。 */
+    private boolean isRemoteMode() {
+        return "remote".equals(getSharedPreferences(PREF, MODE_PRIVATE).getString(PREF_MODE, "builtin"));
     }
 
     /** 桌面模式：默认开启。开启时用桌面 UA + 固定宽视口(1280px)，网页端按电脑布局渲染。 */
@@ -612,7 +702,7 @@ public class MainActivity extends Activity {
         if (webView != null) webView.reload();
     }
 
-    private void loadWebView() {
+    private void loadWebView(final int targetPort) {
         ui.post(() -> {
             FrameLayout frame = new FrameLayout(this);
             frame.setBackgroundColor(Color.BLACK);
@@ -640,8 +730,8 @@ public class MainActivity extends Activity {
                 public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
                     // 桌面模式：把主页的 viewport 从 device-width 重写为固定宽，
                     // 让 window.innerWidth >= 1024，前端按桌面三栏布局渲染。
-                    if (isDesktopMode() && (url.equals("http://127.0.0.1:" + port() + "/")
-                            || url.equals("http://127.0.0.1:" + port() + "/index.html"))) {
+                    if (isDesktopMode() && (url.equals("http://127.0.0.1:" + targetPort + "/")
+                            || url.equals("http://127.0.0.1:" + targetPort + "/index.html"))) {
                         try {
                             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                             c.setConnectTimeout(5000);
@@ -666,7 +756,7 @@ public class MainActivity extends Activity {
                 }
             });
             webView.setWebChromeClient(new WebChromeClient());
-            webView.loadUrl("http://127.0.0.1:" + port());
+            webView.loadUrl("http://127.0.0.1:" + targetPort);
             frame.addView(webView, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -783,7 +873,12 @@ public class MainActivity extends Activity {
         LinearLayout root = dialogRoot(d);
         root.addView(mkRow("修改 API Key 并重启", null, () -> { d.dismiss(); editKeyDialog(); }));
         root.addView(mkDivider());
-        root.addView(mkRow("修改服务端口", "当前 " + port(), () -> { d.dismiss(); editPortDialog(); }));
+        root.addView(mkRow("运行方式", isRemoteMode() ? "连接端口" : "内置实例", () -> {
+            d.dismiss();
+            showStartupChooser();
+        }));
+        root.addView(mkDivider());
+        root.addView(mkRow("修改内置实例端口", "当前 " + port(), () -> { d.dismiss(); editPortDialog(); }));
         root.addView(mkDivider());
         root.addView(mkRow("桌面模式", isDesktopMode() ? "开" : "关", () -> { d.dismiss(); toggleDesktopMode(); }));
         root.addView(mkDivider());
@@ -811,7 +906,7 @@ public class MainActivity extends Activity {
     }
 
     private void editPortDialog() {
-        final Dialog d = buildDialog("修改服务端口");
+        final Dialog d = buildDialog("修改内置实例端口");
         LinearLayout root = dialogRoot(d);
         root.addView(mkLabel("端口范围 1024-65535。改完自动重启服务并刷新界面。", 12, false));
         final EditText input = mkEdit("端口号", false);
@@ -932,6 +1027,15 @@ public class MainActivity extends Activity {
     // ---------------- shutdown ----------------
 
     private void killServer() {
+        if (isRemoteMode()) { // 远程模式不管理内置服务
+            if (prootProcess != null) {
+                int pid = pidOf(prootProcess);
+                if (pid > 0) { try { android.os.Process.killProcess(pid); } catch (Throwable ignored) {} }
+                prootProcess.destroy();
+                prootProcess = null;
+            }
+            return;
+        }
         // kill the dsh child first (its pid is written by boot.sh)
         File pidFile = new File(rootfsDir, "root/dsh.pid");
         try (BufferedReader r = new BufferedReader(new FileReader(pidFile))) {
