@@ -63,9 +63,9 @@ import java.net.URL;
 public class MainActivity extends Activity {
 
     private static final int DEFAULT_PORT = 3091; // 内置实例默认端口
-    private static final int DEFAULT_REMOTE_PORT = 3080; // 连接已有服务默认端口
+    private static final String DEFAULT_REMOTE_ADDR = "127.0.0.1:3080"; // 连接已有服务默认地址
     private static final String PREF_MODE = "mode";       // "builtin" | "remote"
-    private static final String PREF_REMOTE_PORT = "remote_port";
+    private static final String PREF_REMOTE_ADDR = "remote_addr";
     private static final long BOOT_TIMEOUT_MS = 300_000;
     /** 桌面版 Chrome UA —— 让网页端按"电脑"标识渲染 */
     private static final String DESKTOP_UA =
@@ -255,10 +255,9 @@ public class MainActivity extends Activity {
         root.addView(mkLabel("选择本次运行方式", 13, false));
 
         final boolean[] selRemote = {isRemoteMode()};
-        final EditText portInput = mkEdit("端口号", false);
-        portInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        portInput.setText(String.valueOf(remotePort()));
-        portInput.setEnabled(selRemote[0]);
+        final EditText addrInput = mkEdit("127.0.0.1:3080", false);
+        addrInput.setText(remoteAddr());
+        addrInput.setEnabled(selRemote[0]);
 
         final Button rowRemote = mkButton("连接已有服务（端口）", 1);
         final Button rowBuiltin = mkButton("使用内置本地实例", 1);
@@ -266,12 +265,12 @@ public class MainActivity extends Activity {
         rowBuiltin.setTextSize(14);
         rowRemote.setOnClickListener(v -> {
             selRemote[0] = true;
-            portInput.setEnabled(true);
+            addrInput.setEnabled(true);
             refreshChooserRows(rowRemote, rowBuiltin, selRemote);
         });
         rowBuiltin.setOnClickListener(v -> {
             selRemote[0] = false;
-            portInput.setEnabled(false);
+            addrInput.setEnabled(false);
             refreshChooserRows(rowRemote, rowBuiltin, selRemote);
         });
         refreshChooserRows(rowRemote, rowBuiltin, selRemote);
@@ -281,27 +280,36 @@ public class MainActivity extends Activity {
         root.addView(mkLabel("  连接手机里其他 proot 环境已运行的 dsh（不启动内置实例）", 11, false));
         root.addView(rowBuiltin);
         root.addView(mkLabel("  启动 App 内置的 proot + dsh（本机独立实例）", 11, false));
-        root.addView(mkLabel("连接端口（远程模式）", 12, true));
-        root.addView(portInput);
+        root.addView(mkLabel("连接地址（远程模式，如 127.0.0.1:3080）", 12, true));
+        root.addView(addrInput);
 
         Button go = mkButton("进入", 0);
         go.setOnClickListener(v -> {
-            int rp;
+            String addr = addrInput.getText().toString().trim();
+            if (addr.isEmpty()) addr = DEFAULT_REMOTE_ADDR;
+            if (!addr.contains(":")) addr = "127.0.0.1:" + addr;
+            int ci = addr.lastIndexOf(':');
+            String host = addr.substring(0, ci).trim();
+            String ps = addr.substring(ci + 1).trim();
+            int p;
             try {
-                rp = Integer.parseInt(portInput.getText().toString().trim());
+                p = Integer.parseInt(ps);
             } catch (Exception e) {
-                rp = DEFAULT_REMOTE_PORT;
+                p = 0;
             }
-            if (rp < 1024 || rp > 65535) rp = DEFAULT_REMOTE_PORT;
+            if (p < 1 || p > 65535) { toast("端口无效：" + ps); return; }
+            if (host.isEmpty()) host = "127.0.0.1";
+            final String base = "http://" + host + ":" + p;
             getSharedPreferences(PREF, MODE_PRIVATE).edit()
                     .putString(PREF_MODE, selRemote[0] ? "remote" : "builtin")
-                    .putInt(PREF_REMOTE_PORT, rp)
+                    .putString(PREF_REMOTE_ADDR, addr)
                     .apply();
             if (selRemote[0]) {
-                if (httpOk("http://127.0.0.1:" + rp + "/")) {
-                    loadWebView(rp);
+                int code = httpCode(base + "/");
+                if (code >= 200 && code < 500) {
+                    loadWebView(base);
                 } else {
-                    toast("无法连接 127.0.0.1:" + rp + "，请确认该端口的 dsh 服务已运行");
+                    showConnectFailDialog(base, code < 0 ? "连接失败（拒绝/超时/网络隔离）" : "HTTP " + code);
                 }
             } else {
                 showBootConsole();
@@ -310,6 +318,26 @@ public class MainActivity extends Activity {
         });
         root.addView(go);
         setContentView(root);
+    }
+
+    private void showConnectFailDialog(final String base, String reason) {
+        final Dialog d = buildDialog("无法连接");
+        LinearLayout root = dialogRoot(d);
+        root.addView(mkLabel("无法连接 " + base + "\n原因：" + reason
+                + "\n\n提示：dsh 服务默认只监听 127.0.0.1。若目标环境与 App 不在同一网络空间"
+                + "（如应用分身/双开、VPN 加速器），请改用「使用内置本地实例」，或关闭加速器后重试。",
+                13, false));
+        LinearLayout btns = new LinearLayout(this);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        btns.setGravity(Gravity.END);
+        Button back = mkButton("返回修改", 1);
+        back.setOnClickListener(v -> d.dismiss());
+        btns.addView(back);
+        Button force = mkButton("仍然打开", 0);
+        force.setOnClickListener(v -> { d.dismiss(); loadWebView(base); });
+        btns.addView(force);
+        root.addView(btns);
+        d.show();
     }
 
     private void refreshChooserRows(Button remote, Button builtin, boolean[] selRemote) {
@@ -597,7 +625,7 @@ public class MainActivity extends Activity {
                 pumpLog(prootProcess.getInputStream(), prootLog);
                 boolean ok = waitForServer(BOOT_TIMEOUT_MS);
                 if (ok) {
-                    ui.post(() -> { setBusy(false); loadWebView(port()); });
+                    ui.post(() -> { setBusy(false); loadWebView("http://127.0.0.1:" + port()); });
                 } else {
                     ui.post(() -> {
                         setBusy(false);
@@ -624,22 +652,24 @@ public class MainActivity extends Activity {
         while (System.currentTimeMillis() < deadline) {
             if (killed) return false;
             if (prootProcess == null || !prootProcess.isAlive()) return false;
-            if (httpOk("http://127.0.0.1:" + port() + "/")) return true;
+            if (httpCode("http://127.0.0.1:" + port() + "/") >= 200) return true;
             try { Thread.sleep(1000); } catch (InterruptedException e) { return false; }
         }
         return false;
     }
 
-    private boolean httpOk(String urlStr) {
+    /** 返回 HTTP 状态码；连接失败返回 -1。直连绕过系统代理，超时 5 秒。 */
+    private int httpCode(String urlStr) {
         try {
-            HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
-            c.setConnectTimeout(1500);
-            c.setReadTimeout(1500);
+            HttpURLConnection c = (HttpURLConnection) new URL(urlStr)
+                    .openConnection(java.net.Proxy.NO_PROXY);
+            c.setConnectTimeout(5000);
+            c.setReadTimeout(5000);
             int code = c.getResponseCode();
             c.disconnect();
-            return code >= 200 && code < 500;
+            return code;
         } catch (Throwable t) {
-            return false;
+            return -1;
         }
     }
 
@@ -680,9 +710,9 @@ public class MainActivity extends Activity {
         return getSharedPreferences(PREF, MODE_PRIVATE).getInt("port", DEFAULT_PORT);
     }
 
-    /** 连接已有服务的端口（默认 3080）。 */
-    private int remotePort() {
-        return getSharedPreferences(PREF, MODE_PRIVATE).getInt(PREF_REMOTE_PORT, DEFAULT_REMOTE_PORT);
+    /** 连接已有服务的地址（如 127.0.0.1:3080）。 */
+    private String remoteAddr() {
+        return getSharedPreferences(PREF, MODE_PRIVATE).getString(PREF_REMOTE_ADDR, DEFAULT_REMOTE_ADDR);
     }
 
     /** 运行方式：true=连接已有端口服务；false=启动内置实例。 */
@@ -702,7 +732,7 @@ public class MainActivity extends Activity {
         if (webView != null) webView.reload();
     }
 
-    private void loadWebView(final int targetPort) {
+    private void loadWebView(final String base) {
         ui.post(() -> {
             FrameLayout frame = new FrameLayout(this);
             frame.setBackgroundColor(Color.BLACK);
@@ -730,8 +760,8 @@ public class MainActivity extends Activity {
                 public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
                     // 桌面模式：把主页的 viewport 从 device-width 重写为固定宽，
                     // 让 window.innerWidth >= 1024，前端按桌面三栏布局渲染。
-                    if (isDesktopMode() && (url.equals("http://127.0.0.1:" + targetPort + "/")
-                            || url.equals("http://127.0.0.1:" + targetPort + "/index.html"))) {
+                    if (isDesktopMode() && (url.equals(base + "/")
+                            || url.equals(base + "/index.html"))) {
                         try {
                             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                             c.setConnectTimeout(5000);
@@ -756,7 +786,7 @@ public class MainActivity extends Activity {
                 }
             });
             webView.setWebChromeClient(new WebChromeClient());
-            webView.loadUrl("http://127.0.0.1:" + targetPort);
+            webView.loadUrl(base);
             frame.addView(webView, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
