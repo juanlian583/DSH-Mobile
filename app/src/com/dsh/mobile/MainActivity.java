@@ -329,8 +329,8 @@ public class MainActivity extends Activity {
         root.setBackgroundResource(R.drawable.bg_screen);
 
         root.addView(mkLabel("DSH 智能体", 26, true));
-        root.addView(mkLabel("首次使用需安装运行时（约 300~600MB，仅一次）。"
-                + "粘贴你的 DeepSeek API Key 后即可开始。", 13, false));
+        root.addView(mkLabel("只需粘贴 DeepSeek API Key。运行时将从内置地址自动下载"
+                + "（约 300~600MB，仅一次）。", 13, false));
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -341,13 +341,26 @@ public class MainActivity extends Activity {
         clp.setMargins(0, dp(20), 0, dp(16));
         root.addView(card, clp);
 
-        card.addView(mkLabel("运行时包下载地址", 13, true));
-        urlInput = mkEdit(getString(R.string.runtime_url_default), false);
-        card.addView(urlInput);
-
         card.addView(mkLabel("DeepSeek API Key", 13, true));
         keyInput = mkEdit("sk-...", true);
         card.addView(keyInput);
+
+        // 高级选项：下载地址（默认已内置，正常无需修改）
+        Button advToggle = mkButton("高级选项（下载地址） ▾", 1);
+        advToggle.setTextSize(13);
+        final LinearLayout advBox = new LinearLayout(this);
+        advBox.setOrientation(LinearLayout.VERTICAL);
+        advBox.setVisibility(View.GONE);
+        advBox.addView(mkLabel("运行时包下载地址（已内置默认值，一般不用改）", 12, false));
+        urlInput = mkEdit(getString(R.string.runtime_url_default), false);
+        advBox.addView(urlInput);
+        advToggle.setOnClickListener(v -> {
+            boolean show = advBox.getVisibility() != View.VISIBLE;
+            advBox.setVisibility(show ? View.VISIBLE : View.GONE);
+            advToggle.setText("高级选项（下载地址） " + (show ? "▴" : "▾"));
+        });
+        card.addView(advToggle);
+        card.addView(advBox);
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setVisibility(View.GONE);
@@ -408,7 +421,8 @@ public class MainActivity extends Activity {
                 ui.post(() -> {
                     setBusy(false);
                     log("✗ 安装失败：" + t);
-                    toast("安装失败，请检查地址/网络/存储空间");
+                    log("  提示：若是下载失败，可展开「高级选项」检查下载地址。");
+                    toast("安装失败，见日志");
                 });
             }
         }).start();
