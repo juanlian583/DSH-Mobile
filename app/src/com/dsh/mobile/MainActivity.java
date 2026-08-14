@@ -73,12 +73,12 @@ public class MainActivity extends Activity {
 
     private final Handler ui = new Handler(Looper.getMainLooper());
 
-    private File filesDir, rootfsDir, binDir, runtimeTar, readyFlag, prootBin, prootLog;
+    private File filesDir, rootfsDir, binDir, readyFlag, prootBin, prootLog;
 
     private WebView webView;
     private TextView console;
     private ProgressBar progressBar;
-    private EditText urlInput, keyInput;
+    private EditText keyInput;
     private Button actionButton;
 
     private Process prootProcess;
@@ -94,7 +94,6 @@ public class MainActivity extends Activity {
         filesDir = getFilesDir();
         rootfsDir = new File(filesDir, "rootfs");
         binDir = new File(filesDir, "bin");
-        runtimeTar = new File(filesDir, "runtime.tar.gz");
         readyFlag = new File(filesDir, "ready.flag");
         prootBin = new File(binDir, "proot");
         prootLog = new File(filesDir, "dsh-proot.log");
@@ -329,8 +328,8 @@ public class MainActivity extends Activity {
         root.setBackgroundResource(R.drawable.bg_screen);
 
         root.addView(mkLabel("DSH 智能体", 26, true));
-        root.addView(mkLabel("只需粘贴 DeepSeek API Key。运行时将从内置地址自动下载"
-                + "（约 300~600MB，仅一次）。", 13, false));
+        root.addView(mkLabel("只需粘贴 DeepSeek API Key。运行时已内置在安装包里，"
+                + "无需下载，安装即用。", 13, false));
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -344,24 +343,6 @@ public class MainActivity extends Activity {
         card.addView(mkLabel("DeepSeek API Key", 13, true));
         keyInput = mkEdit("sk-...", true);
         card.addView(keyInput);
-
-        // 高级选项：下载地址（默认已内置，正常无需修改）
-        Button advToggle = mkButton("高级选项（下载地址） ▾", 1);
-        advToggle.setTextSize(13);
-        final LinearLayout advBox = new LinearLayout(this);
-        advBox.setOrientation(LinearLayout.VERTICAL);
-        advBox.setVisibility(View.GONE);
-        advBox.addView(mkLabel("运行时包下载地址（已内置默认值，一般不用改）", 12, false));
-        urlInput = mkEdit("https://…（默认已填好）", false);
-        urlInput.setText(getString(R.string.runtime_url_default)); // 真正填入默认值，而非仅提示
-        advBox.addView(urlInput);
-        advToggle.setOnClickListener(v -> {
-            boolean show = advBox.getVisibility() != View.VISIBLE;
-            advBox.setVisibility(show ? View.VISIBLE : View.GONE);
-            advToggle.setText("高级选项（下载地址） " + (show ? "▴" : "▾"));
-        });
-        card.addView(advToggle);
-        card.addView(advBox);
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setVisibility(View.GONE);
@@ -394,40 +375,43 @@ public class MainActivity extends Activity {
     }
 
     private void startSetup() {
-        final String url = urlInput.getText().toString().trim();
         final String key = keyInput.getText().toString().trim();
-        if (url.isEmpty()) { toast("请填写运行时包下载地址"); return; }
         if (key.isEmpty()) { toast("请粘贴 DeepSeek API Key"); return; }
         setBusy(true);
-        log("→ 开始安装运行时…");
+        log("→ 开始安装（运行时已内置，无需下载）…");
         new Thread(() -> {
             try {
-                log("1/5 准备 proot 二进制…");
+                log("1/4 准备 proot 二进制…");
                 installProotBinary();
-                log("2/5 下载运行时包…");
-                download(url, runtimeTar);
-                log("3/5 解压 rootfs…");
+                log("2/4 解压内置运行时（约需几分钟，请耐心等待）…");
                 ensureWritableDir(rootfsDir);
-                TarExtractor.extract(runtimeTar, rootfsDir, (bytes, entry) -> {
-                    if ((bytes % (256L << 20)) < (1 << 16)) {
-                        log("   …已解压 " + (bytes >> 20) + " MB");
-                    }
-                });
-                runtimeTar.delete(); // 释放 267MB 临时包
-                log("4/5 写入 API Key…");
+                extractRuntimeFromAsset();
+                log("3/4 写入 API Key…");
                 writeApiKey(key);
-                log("5/5 安装完成 ✓");
+                log("4/4 安装完成 ✓");
                 new File(filesDir, "ready.flag").createNewFile();
                 ui.post(() -> { setBusy(false); startServer(); });
             } catch (final Throwable t) {
                 ui.post(() -> {
                     setBusy(false);
                     log("✗ 安装失败：" + t);
-                    log("  提示：若是下载失败，可展开「高级选项」检查下载地址。");
+                    log("  提示：请确认存储空间充足；若为权限问题请清除数据或卸载重装。");
                     toast("安装失败，见日志");
                 });
             }
         }).start();
+    }
+
+    /** 直接从 APK 内置资源解压运行时（无需网络下载）。 */
+    private void extractRuntimeFromAsset() throws IOException {
+        AssetManager am = getAssets();
+        try (InputStream in = am.open("runtime.tar.gz")) {
+            TarExtractor.extractGz(in, rootfsDir, (bytes, entry) -> {
+                if ((bytes % (256L << 20)) < (1 << 16)) {
+                    log("   …已解压 " + (bytes >> 20) + " MB");
+                }
+            });
+        }
     }
 
     // ---------------- install steps ----------------
@@ -488,69 +472,6 @@ public class MainActivity extends Activity {
         if (!f.canExecute()) {
             throw new IOException("无法设置执行权限: " + f);
         }
-    }
-
-    /** 下载（带断点续传 + 自动重试，网络中断不丢进度）。 */
-    private void download(String urlStr, File target) throws IOException {
-        File part = new File(target.getAbsolutePath() + ".part");
-        for (int attempt = 1; attempt <= 6; attempt++) {
-            long resume = part.exists() ? part.length() : 0;
-            HttpURLConnection conn = null;
-            try {
-                conn = open(urlStr, resume);
-                int code = conn.getResponseCode();
-                if (resume > 0 && code == 200) {
-                    // 服务器不支持断点续传：从头再来
-                    part.delete();
-                    resume = 0;
-                    conn.disconnect();
-                    conn = open(urlStr, 0);
-                    code = conn.getResponseCode();
-                }
-                if (code != 200 && code != 206) throw new IOException("HTTP " + code + " (下载地址无效?)");
-                // 206 时 Content-Length 是剩余部分
-                long total = resume + conn.getContentLengthLong();
-                long done = resume;
-                try (InputStream in = conn.getInputStream();
-                     OutputStream out = new FileOutputStream(part, resume > 0)) {
-                    byte[] buf = new byte[1 << 16];
-                    int r;
-                    long lastReport = 0;
-                    while ((r = in.read(buf)) > 0) {
-                        out.write(buf, 0, r);
-                        done += r;
-                        if (total > 0 && done - lastReport > (8L << 20)) {
-                            lastReport = done;
-                            final long d = done, t = total;
-                            log("   下载 " + (d >> 20) + " / " + (t >> 20) + " MB");
-                        }
-                    }
-                }
-                if (total > 0 && done < total) {
-                    throw new IOException("下载不完整: " + done + "/" + total);
-                }
-                if (!part.renameTo(target)) {
-                    target.delete();
-                    part.renameTo(target);
-                }
-                return; // 成功
-            } catch (IOException e) {
-                if (attempt >= 6) throw e;
-                log("   连接中断(" + e.getClass().getSimpleName() + ")，" + (attempt + 1) + " 秒后自动续传…");
-                try { Thread.sleep((attempt + 1) * 1000L); } catch (InterruptedException ie) { throw e; }
-            } finally {
-                if (conn != null) conn.disconnect();
-            }
-        }
-    }
-
-    private HttpURLConnection open(String urlStr, long resume) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(90_000);
-        conn.setInstanceFollowRedirects(true);
-        if (resume > 0) conn.setRequestProperty("Range", "bytes=" + resume + "-");
-        return conn;
     }
 
     private void writeApiKey(String key) throws IOException {

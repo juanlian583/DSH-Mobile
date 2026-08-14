@@ -21,8 +21,8 @@ KS=${DSH_KEYSTORE:-$SRC/../dsh.keystore}
 KS_PASS=${DSH_KEYSTORE_PASS:-dsh123456}
 KS_ALIAS=dshkey
 
-VERSION_NAME=1.16
-VERSION_CODE=17
+VERSION_NAME=1.17
+VERSION_CODE=18
 APK_NAME="DSH-Mobile-${VERSION_NAME}.apk"
 
 # 架构检测：x86_64 原生跑 SDK 工具；其他（arm64）用 qemu-x86_64
@@ -36,6 +36,19 @@ fi
 
 echo "=== [0] 准备资源 ==="
 mkdir -p $SRC/assets $OUT
+
+# 内置运行时包（搜索 releases/ 或 runtime/）
+RUNTIME=""
+for cand in "$SRC/../releases/dsh-runtime-arm64.tar.gz" "$SRC/../runtime/dsh-runtime-arm64.tar.gz"; do
+  if [ -f "$cand" ]; then RUNTIME="$cand"; break; fi
+done
+if [ -z "$RUNTIME" ]; then
+  echo "ERROR: 找不到运行时包 dsh-runtime-arm64.tar.gz"
+  echo "  请用 runtime/build-rootfs.sh 构建，或从 GitHub Releases 下载后放到 releases/ 或 runtime/"
+  exit 1
+fi
+echo "   内置运行时: $RUNTIME ($(du -h "$RUNTIME" | cut -f1))"
+cp "$RUNTIME" "$SRC/assets/runtime.tar.gz"
 
 # 构建静态 proot（来自 proot-me/proot 源码，GPL-2.0，见 THIRD_PARTY_NOTICES.md）
 if [ ! -f $SRC/assets/proot ]; then
@@ -63,6 +76,7 @@ $AAPT2 link \
   --java $WORK/gen \
   -A $SRC/assets \
   --auto-add-overlay \
+  -0 gz \
   --min-sdk-version 26 \
   --target-sdk-version 28 \
   --version-code $VERSION_CODE \

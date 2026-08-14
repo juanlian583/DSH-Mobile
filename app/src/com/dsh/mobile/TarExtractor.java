@@ -29,7 +29,12 @@ public final class TarExtractor {
     private TarExtractor() {}
 
     public static void extract(File tarGz, File destDir, Progress progress) throws IOException {
-        try (InputStream in = new GZIPInputStream(new BufferedInputStream(new FileInputStream(tarGz), 1 << 16))) {
+        extractGz(new FileInputStream(tarGz), destDir, progress);
+    }
+
+    /** 从任意原始(gzip)流解压——用于直接从 APK 资源内置运行时解压。 */
+    public static void extractGz(InputStream rawIn, File destDir, Progress progress) throws IOException {
+        try (InputStream in = new GZIPInputStream(new BufferedInputStream(rawIn, 1 << 16))) {
             extractStream(in, destDir, progress);
         }
     }

@@ -19,36 +19,35 @@ bash / 文件 / 子代理 / 网页搜索等全部工具都在手机上真实运�
 
 ## 下载
 
-在 **Releases** 页面下载两个文件：
+在 **Releases** 页面下载 **一个文件**：
 
 | 文件 | 说明 |
 |---|---|
-| `DSH-Mobile-<版本>.apk` | 安卓安装包（arm64，Android 8.0+），**装上即用**（运行时地址已内置） |
-| `dsh-runtime-arm64.tar.gz` | 运行时（Ubuntu 24.04 + Node 24 + dsh），约 267MB |
+| `DSH-Mobile-<版本>.apk` | 安卓安装包（arm64，Android 8.0+），**约 270MB，运行时已内置，装上即用** |
+
+（`dsh-runtime-arm64.tar.gz` 仅作独立参考/复用，普通用户无需下载。）
 
 ## 安装与首次运行
 
 1. 安装 APK（允许"未知来源"）。
 2. 打开 App，**只需粘贴 DeepSeek API Key**（`sk-...`，DeepSeek 开放平台获取）。
-   运行时包下载地址已内置（固定指向 v1.7 Release 的运行时，无需填写）。
-3. 点「开始安装并启动」：自动下载 → 解压（需约 2GB 空间）→ 自动启动进入界面。
+3. 点「开始安装并启动」：解压内置运行时（无需网络，需约 2GB 空间）→ 自动启动进入界面。
 
 ## 从源码构建
 
 ```bash
-# 1) 构建 APK（依赖 JDK17+ / Android SDK 35 / python3；arm64 主机需 qemu-user）
-cd app && ./build.sh            # 输出 ../releases/DSH-Mobile-<版本>.apk
-
-# 2) 构建运行时（可选；arm64 Linux + root，产物直接上传 Releases）
+# 1) 准备运行时包（若 releases/ 下已有 dsh-runtime-arm64.tar.gz 可跳过）
 cd runtime && sudo ./build-rootfs.sh ../releases
+
+# 2) 构建 APK（依赖 JDK17+ / Android SDK 35 / python3；arm64 主机需 qemu-user）
+cd app && ./build.sh            # 输出 ../releases/DSH-Mobile-<版本>.apk（内置运行时）
 ```
 
 构建脚本会自动获取并编译 proot 静态二进制（见 THIRD_PARTY_NOTICES.md）。
 
-> 当前所有版本均为 **beta（预发布）** 状态。注意：全部标记预发布后
-> `releases/latest` 直链会失效，因此 App 内置的运行时下载地址**固定指向 v1.7 的直链**。
-> **发布新版本时若运行时未变，无需改动；若运行时更新，需同步上传新包并更新
-> `app/res/values/strings.xml` 里的默认下载地址**。
+> 当前所有版本均为 **beta（预发布）** 状态。自 v1.17 起，**运行时已内置进 APK**，
+> 无需任何网络下载；发布新版本时用 `runtime/build-rootfs.sh` 构建运行时并放到
+> `releases/`，`build.sh` 会自动内置。
 
 ## 发布到 GitHub Releases（维护者）
 
@@ -58,8 +57,8 @@ keytool -genkeypair -keystore dsh.keystore -alias dshkey -keyalg RSA -keysize 20
 # 2) 构建产物
 cd app && ./build.sh
 # 3) 到 GitHub 仓库页 → Releases → 新建 Release（打 tag）
-#   上传：DSH-Mobile-<版本>.apk 和 dsh-runtime-arm64.tar.gz
-#   在 Release 说明里给出运行时直链，供用户填入 App
+#   上传：DSH-Mobile-<版本>.apk（已内置运行时，用户只装这一个文件）
+#   （dsh-runtime-arm64.tar.gz 可一并上传供独立参考/复用）
 ```
 
 ## 常见问题
