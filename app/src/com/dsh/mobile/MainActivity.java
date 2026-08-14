@@ -612,8 +612,13 @@ public class MainActivity extends Activity {
         if (booting || prootProcess != null) return;
         booting = true;
         setBusy(true);
-        appLog("启动内置 dsh（端口 " + port() + "）");
-        log("→ 正在启动 dsh 服务（端口 " + port() + "，首次较慢）…");
+        final int actualPort = findFreePort(port());
+        if (actualPort != port()) {
+            appLog("内置端口 " + port() + " 被占用，自动改用 " + actualPort);
+            log("⚠ 端口 " + port() + " 被占用，自动改用 " + actualPort);
+        }
+        appLog("启动内置 dsh（端口 " + actualPort + "）");
+        log("→ 正在启动 dsh 服务（端口 " + actualPort + "，首次较慢）…");
         new Thread(() -> {
             try {
                 makeExecutable(prootBin);
@@ -633,17 +638,17 @@ public class MainActivity extends Activity {
                                 + "export DSH_HOME=/root/.dsh; export DSH_TELEMETRY_DISABLED=1; "
                                 + "mkdir -p $DSH_HOME; "
                                 + "if [ -f /root/dsh.pid ]; then kill $(cat /root/dsh.pid) 2>/dev/null || true; fi; "
-                                + "dsh web --port " + port() + " >> /root/dsh.log 2>&1 & "
+                                + "dsh web --port " + actualPort + " >> /root/dsh.log 2>&1 & "
                                 + "DPID=$!; echo $DPID > /root/dsh.pid; wait $DPID"
                 );
                 pb.redirectErrorStream(true);
                 prootProcess = pb.start();
                 log("   proot 已启动 (pid=" + pidOf(prootProcess) + ")，等待 dsh 就绪…");
                 pumpLog(prootProcess.getInputStream(), prootLog);
-                boolean ok = waitForServer(BOOT_TIMEOUT_MS);
+                boolean ok = waitForServer(actualPort, BOOT_TIMEOUT_MS);
                 if (ok) {
-                    appLog("内置 dsh 就绪（端口 " + port() + "）");
-                    ui.post(() -> { setBusy(false); loadWebView("http://127.0.0.1:" + port()); });
+                    appLog("内置 dsh 就绪（端口 " + actualPort + "）");
+                    ui.post(() -> { setBusy(false); loadWebView("http://127.0.0.1:" + actualPort); });
                 } else {
                     ui.post(() -> {
                         setBusy(false);
@@ -665,15 +670,35 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private boolean waitForServer(long timeoutMs) {
+    private boolean waitForServer(int port, long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
             if (killed) return false;
             if (prootProcess == null || !prootProcess.isAlive()) return false;
-            if (httpCode("http://127.0.0.1:" + port() + "/") >= 200) return true;
+            if (httpCode("http://127.0.0.1:" + port + "/") >= 200) return true;
             try { Thread.sleep(1000); } catch (InterruptedException e) { return false; }
         }
         return false;
+    }
+
+    /** 探测端口是否被占用（TCP 连接测试）。 */
+    private boolean portInUse(int port) {
+        try (java.net.Socket s = new java.net.Socket()) {
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", port), 500);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 从首选端口起找第一个空闲端口（最多向上探测 40 个）。 */
+    private int findFreePort(int preferred) {
+        for (int i = 0; i < 40; i++) {
+            int p = preferred + i;
+            if (p > 65535) p = 1024 + (p - 65536);
+            if (!portInUse(p)) return p;
+        }
+        return preferred;
     }
 
     /** 返回 HTTP 状态码；连接失败返回 -1。直连绕过系统代理，超时 5 秒。 */
