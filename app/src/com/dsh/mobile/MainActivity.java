@@ -49,6 +49,7 @@ import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
+import java.nio.charset.StandardCharsets;
 import java.net.URL;
 
 /**
@@ -214,19 +215,21 @@ public class MainActivity extends Activity {
     private String readLogTail() {
         StringBuilder sb = new StringBuilder();
         for (File f : new File[]{prootLog, new File(rootfsDir, "root/dsh.log")}) {
-            if (f.exists()) {
+            if (f.exists() && f.length() > 0) {
                 sb.append("===== ").append(f.getName()).append(" =====\n");
+                long len = f.length();
+                long start = Math.max(0, len - 32 * 1024);
                 try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
-                    long len = raf.length();
-                    long start = Math.max(0, len - 16 * 1024);
                     raf.seek(start);
-                    String line;
-                    long bytes = 0;
-                    while ((line = raf.readLine()) != null) {
-                        bytes += line.length() + 1;
-                        if (bytes > 16 * 1024) break;
-                        sb.append(line).append('\n');
-                    }
+                    byte[] buf = new byte[(int) (len - start)];
+                    raf.readFully(buf);
+                    // UTF-8 解码（readLine 会把中文变成乱码）
+                    String text = new String(buf, StandardCharsets.UTF_8);
+                    // 开头若被截断成半行，丢掉它
+                    int nl = text.indexOf('\n');
+                    if (nl >= 0 && start > 0) text = text.substring(nl + 1);
+                    sb.append(text);
+                    if (!text.endsWith("\n")) sb.append('\n');
                 } catch (IOException ignored) {}
             }
         }
@@ -288,18 +291,31 @@ public class MainActivity extends Activity {
 
     private void startLogTail() {
         ui.postDelayed(new Runnable() {
-            private long lastLen = 0;
+            private long pos1 = -1;
+            private long pos2 = -1;
             @Override
             public void run() {
                 if (killed || webView != null) return;
-                long len = prootLog.exists() ? prootLog.length() : 0;
-                File dl = new File(rootfsDir, "root/dsh.log");
-                long len2 = dl.exists() ? dl.length() : 0;
-                if (len != lastLen || len2 != lastLen) {
-                    lastLen = Math.max(len, len2);
-                    log(readLogTail());
-                }
+                pos1 = appendDelta(prootLog, pos1);
+                pos2 = appendDelta(new File(rootfsDir, "root/dsh.log"), pos2);
                 ui.postDelayed(this, 1500);
+            }
+
+            /** 只追加自 pos 以来的新内容；返回新位置（文件被清空/缩短则重置）。 */
+            private long appendDelta(File f, long pos) {
+                long len = f.exists() ? f.length() : 0;
+                if (len == 0) return 0;
+                if (pos < 0 || len < pos) pos = Math.max(0, len - 4096); // 首次只显示最近 4KB
+                if (len > pos) {
+                    try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
+                        raf.seek(pos);
+                        byte[] buf = new byte[(int) (len - pos)];
+                        raf.readFully(buf);
+                        log(new String(buf, StandardCharsets.UTF_8));
+                    } catch (IOException ignored) {}
+                    return len;
+                }
+                return pos;
             }
         }, 1500);
     }
